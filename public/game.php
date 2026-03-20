@@ -43,10 +43,33 @@ $inningBySide = ['away' => [], 'home' => []];
 foreach ($innings as $inning) {
     $inningBySide[$inning['side']][$inning['inning_number']] = $inning['runs_scored'];
 }
+$playedHalfBySide = ['away' => [], 'home' => []];
+foreach ($plays as $play) {
+    $side = $play['half'] === 'top' ? 'away' : 'home';
+    $playedHalfBySide[$side][$play['inning_number']] = true;
+}
+$maxDisplayedInning = max(
+    9,
+    max(array_keys($inningBySide['away'] ?: [0 => 0])),
+    max(array_keys($inningBySide['home'] ?: [0 => 0]))
+);
 $battingBySide = ['away' => [], 'home' => []];
 foreach ($batting as $row) { $battingBySide[$row['side']][] = $row; }
 $pitchingBySide = ['away' => [], 'home' => []];
 foreach ($pitching as $row) { $pitchingBySide[$row['side']][] = $row; }
+
+function format_line_score_cell(string $side, int $inningNumber, array $inningBySide, array $playedHalfBySide): string
+{
+    if (!array_key_exists($inningNumber, $inningBySide[$side])) {
+        return '-';
+    }
+
+    if ((int) $inningBySide[$side][$inningNumber] === 0 && !isset($playedHalfBySide[$side][$inningNumber])) {
+        return '-';
+    }
+
+    return (string) (int) $inningBySide[$side][$inningNumber];
+}
 ?>
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
   <div>
@@ -64,10 +87,10 @@ foreach ($pitching as $row) { $pitchingBySide[$row['side']][] = $row; }
   <h2 class="h4 mb-3">Line Score</h2>
   <div class="table-responsive">
     <table class="table align-middle">
-      <thead><tr><th>Team</th><?php for ($i = 1; $i <= 9; $i++): ?><th><?= $i ?></th><?php endfor; ?><th>R</th><th>H</th><th>E</th></tr></thead>
+      <thead><tr><th>Team</th><?php for ($i = 1; $i <= $maxDisplayedInning; $i++): ?><th><?= $i ?></th><?php endfor; ?><th>R</th><th>H</th><th>E</th></tr></thead>
       <tbody>
-        <tr><td><?= htmlspecialchars($game['away_team']) ?></td><?php for ($i = 1; $i <= 9; $i++): ?><td><?= (int) ($inningBySide['away'][$i] ?? 0) ?></td><?php endfor; ?><td><?= (int) $game['away_runs'] ?></td><td><?= (int) $game['away_hits'] ?></td><td><?= (int) $game['away_errors'] ?></td></tr>
-        <tr><td><?= htmlspecialchars($game['home_team']) ?></td><?php for ($i = 1; $i <= 9; $i++): ?><td><?= (int) ($inningBySide['home'][$i] ?? 0) ?></td><?php endfor; ?><td><?= (int) $game['home_runs'] ?></td><td><?= (int) $game['home_hits'] ?></td><td><?= (int) $game['home_errors'] ?></td></tr>
+        <tr><td><?= htmlspecialchars($game['away_team']) ?></td><?php for ($i = 1; $i <= $maxDisplayedInning; $i++): ?><td><?= htmlspecialchars(format_line_score_cell('away', $i, $inningBySide, $playedHalfBySide)) ?></td><?php endfor; ?><td><?= (int) $game['away_runs'] ?></td><td><?= (int) $game['away_hits'] ?></td><td><?= (int) $game['away_errors'] ?></td></tr>
+        <tr><td><?= htmlspecialchars($game['home_team']) ?></td><?php for ($i = 1; $i <= $maxDisplayedInning; $i++): ?><td><?= htmlspecialchars(format_line_score_cell('home', $i, $inningBySide, $playedHalfBySide)) ?></td><?php endfor; ?><td><?= (int) $game['home_runs'] ?></td><td><?= (int) $game['home_hits'] ?></td><td><?= (int) $game['home_errors'] ?></td></tr>
       </tbody>
     </table>
   </div>

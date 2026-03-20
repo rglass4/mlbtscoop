@@ -38,6 +38,7 @@ function app_env(string $key, ?string $default = null): ?string
 function db(): PDO
 {
     static $pdo = null;
+    static $schemaEnsured = false;
 
     if ($pdo instanceof PDO) {
         return $pdo;
@@ -58,5 +59,16 @@ function db(): PDO
     ];
 
     $pdo = new PDO($dsn, $user, $password, $options);
+    if (!$schemaEnsured) {
+        ensure_runtime_schema($pdo);
+        $schemaEnsured = true;
+    }
     return $pdo;
+}
+
+function ensure_runtime_schema(PDO $pdo): void
+{
+    $pdo->exec('ALTER TABLE batting_lines ADD COLUMN IF NOT EXISTS doubles INTEGER NOT NULL DEFAULT 0');
+    $pdo->exec('ALTER TABLE batting_lines ADD COLUMN IF NOT EXISTS triples INTEGER NOT NULL DEFAULT 0');
+    $pdo->exec('ALTER TABLE batting_lines ADD COLUMN IF NOT EXISTS home_runs INTEGER NOT NULL DEFAULT 0');
 }

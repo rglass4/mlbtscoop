@@ -25,17 +25,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 try {
                     $parsed = parse_saved_game_html($html);
-                    $check = $pdo->prepare('SELECT id FROM games WHERE external_game_id = :external_game_id LIMIT 1');
-                    $check->execute(['external_game_id' => $parsed['game']['external_game_id']]);
-                    if ($check->fetch()) {
-                        throw new RuntimeException('That game ID already exists in the database.');
-                    }
                     $filename = basename((string) $_FILES['game_html']['name']);
                     $storagePath = dirname(__DIR__) . '/storage/uploads/' . time() . '_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $filename);
                     move_uploaded_file($tmpPath, $storagePath);
                     $_SESSION['import_preview'] = ['parsed' => $parsed, 'filename' => $filename, 'storage_path' => $storagePath];
                     $preview = $_SESSION['import_preview'];
-                    flash_set('info', 'Preview generated. Review the parsed data and confirm import.');
+                    $reimporting = find_existing_game_id($pdo, $parsed['game']['external_game_id']) !== null;
+                    flash_set(
+                        'info',
+                        $reimporting
+                            ? 'Preview generated. Confirm import to replace the existing game with this upload.'
+                            : 'Preview generated. Review the parsed data and confirm import.'
+                    );
                     header('Location: /import.php');
                     exit;
                 } catch (Throwable $throwable) {
@@ -47,9 +48,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'confirm' && $preview) {
         try {
+            $reimporting = find_existing_game_id($pdo, $preview['parsed']['game']['external_game_id']) !== null;
             $gameId = import_parsed_game($pdo, $preview['parsed'], (int) current_user()['id'], $preview['filename']);
             unset($_SESSION['import_preview']);
-            flash_set('success', sprintf('Game %s imported successfully.', $preview['parsed']['game']['external_game_id']));
+            flash_set(
+                'success',
+                $reimporting
+                    ? sprintf('Game %s was replaced and re-imported successfully.', $preview['parsed']['game']['external_game_id'])
+                    : sprintf('Game %s imported successfully.', $preview['parsed']['game']['external_game_id'])
+            );
             header('Location: /game.php?id=' . $gameId);
             exit;
         } catch (Throwable $throwable) {
@@ -99,12 +106,13 @@ require __DIR__ . '/../includes/header.php';
           </form>
         <?php endif; ?>
       </div>
-      <?php if ($preview): $parsed = $preview['parsed']; ?>
+      <?php if ($preview): $parsed = $preview['parsed']; $reimporting = find_existing_game_id($pdo, $parsed['game']['external_game_id']) !== null; ?>
         <div class="mb-3">
           <span class="badge-soft">Game <?= htmlspecialchars($parsed['game']['external_game_id']) ?></span>
           <h3 class="h5 mt-2 mb-1"><?= htmlspecialchars($parsed['game']['away_team']) ?> @ <?= htmlspecialchars($parsed['game']['home_team']) ?></h3>
           <p class="text-body-secondary mb-0"><?= htmlspecialchars((string) $parsed['game']['played_at_text']) ?> · <?= htmlspecialchars((string) $preview['filename']) ?></p>
         </div>
+        <?php if ($reimporting): ?><div class="alert alert-warning">This game already exists. Confirm import to replace the existing record and all related lines.</div><?php endif; ?>
         <div class="row g-3 mb-3">
           <div class="col-md-4"><div class="card p-3"><div class="text-body-secondary">Batting Lines</div><div class="h3 mb-0"><?= count($parsed['batting_lines']) ?></div></div></div>
           <div class="col-md-4"><div class="card p-3"><div class="text-body-secondary">Pitching Lines</div><div class="h3 mb-0"><?= count($parsed['pitching_lines']) ?></div></div></div>

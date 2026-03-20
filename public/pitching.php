@@ -4,12 +4,28 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/db.php';
 $pageTitle = 'Pitching Leaderboard';
-$leaders = db()->query('SELECT * FROM v_pitching_leaders ORDER BY era ASC NULLS LAST, strikeouts DESC, innings_pitched_outs DESC')->fetchAll();
+$leaders = db()->query("
+    SELECT
+        player_name,
+        team_name,
+        COUNT(DISTINCT game_id) AS games_pitched,
+        SUM(innings_pitched_outs) AS innings_pitched_outs,
+        SUM(hits_allowed) AS hits_allowed,
+        SUM(runs_allowed) AS runs_allowed,
+        SUM(earned_runs) AS earned_runs,
+        SUM(walks) AS walks,
+        SUM(strikeouts) AS strikeouts,
+        CASE WHEN SUM(innings_pitched_outs) = 0 THEN NULL ELSE ROUND((SUM(earned_runs) * 27.0 / SUM(innings_pitched_outs))::NUMERIC, 2) END AS era
+    FROM pitching_lines
+    WHERE team_name = 'Mustangs'
+    GROUP BY player_name, team_name
+    ORDER BY era ASC NULLS LAST, strikeouts DESC, innings_pitched_outs DESC, player_name ASC
+")->fetchAll();
 require __DIR__ . '/../includes/header.php';
 ?>
 <div class="mb-4">
   <h1 class="h2 mb-1">Pitching Leaderboard</h1>
-  <p class="text-body-secondary mb-0">Aggregated pitching lines across all imported games.</p>
+  <p class="text-body-secondary mb-0">Aggregated Mustangs pitching lines across all imported games.</p>
 </div>
 <div class="card p-3">
   <div class="table-responsive">

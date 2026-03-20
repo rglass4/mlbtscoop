@@ -120,7 +120,10 @@ function parse_saved_game_html(string $html): array
     $playLogHtml = $logParts[0] ?? '';
     $perfectHtml = $logParts[1] ?? '';
 
-    $playEvents = extract_play_events(strip_tags($playLogHtml, '<br>'));
+    $playText = strip_tags($playLogHtml, '<br>');
+    $halfInningLogs = extract_half_inning_logs($playText);
+    $playEvents = extract_play_events($halfInningLogs);
+    $battingLines = attach_extra_base_hit_totals($battingLines, $halfInningLogs);
     $perfectEvents = extract_perfect_events(strip_tags($perfectHtml, '<br>'));
     $metadata = extract_game_metadata($gameLogSection->textContent);
 
@@ -203,9 +206,9 @@ function import_parsed_game(PDO $pdo, array $parsed, int $userId, ?string $filen
             $inningStmt->execute($line + ['game_id' => $gameId]);
         }
 
-        $battingStmt = $pdo->prepare('INSERT INTO batting_lines (game_id, side, team_name, player_name, position, at_bats, runs, hits, rbi, walks, strikeouts, batting_average) VALUES (:game_id, :side, :team_name, :player_name, :position, :at_bats, :runs, :hits, :rbi, :walks, :strikeouts, :average)');
+        $battingStmt = $pdo->prepare('INSERT INTO batting_lines (game_id, side, team_name, player_name, position, at_bats, runs, hits, rbi, walks, strikeouts, doubles, triples, home_runs, batting_average) VALUES (:game_id, :side, :team_name, :player_name, :position, :at_bats, :runs, :hits, :rbi, :walks, :strikeouts, :doubles, :triples, :home_runs, :average)');
         foreach ($parsed['batting_lines'] as $line) {
-            $battingStmt->execute($line + ['game_id' => $gameId]);
+            $battingStmt->execute($line + ['doubles' => 0, 'triples' => 0, 'home_runs' => 0, 'game_id' => $gameId]);
         }
 
         $pitchingStmt = $pdo->prepare('INSERT INTO pitching_lines (game_id, side, team_name, player_name, decision, innings_pitched_outs, hits_allowed, runs_allowed, earned_runs, walks, strikeouts, era) VALUES (:game_id, :side, :team_name, :player_name, :decision, :innings_pitched, :hits_allowed, :runs_allowed, :earned_runs, :walks, :strikeouts, :era)');
@@ -307,24 +310,23 @@ function parse_summary_teams(DOMXPath $xpath, DOMNode $summaryTable): array
     return $teams;
 }
 
-function extract_play_events(string $plainText): array
+function extract_half_inning_logs(string $plainText): array
 {
     $text = html_entity_decode($plainText, ENT_QUOTES | ENT_HTML5);
     $text = preg_replace('/\s+/', ' ', $text ?? '');
     preg_match_all('/Inning\s+(\d+):\s*(.*?)((?=Inning\s+\d+:)|(?=Game Log Legend)|$)/i', $text, $matches, PREG_SET_ORDER);
 
-    $events = [];
-    $sequence = 1;
+    $halves = [];
     foreach ($matches as $inningMatch) {
         $inning = (int) $inningMatch[1];
         $inningText = trim($inningMatch[2]);
-        preg_match_all('/([A-Za-z0-9 .\-]+) batting\.(.*?)Runs:\s*(\d+) Hits:\s*(\d+) Walks:\s*(\d+) Errors:\s*(\d+) Pitches:\s*(\d+)(?: Runners Left On:\s*(\d+))?/i', $inningText, $halfMatches, PREG_SET_ORDER);
+        preg_match_all('/([A-Za-z0-9 .\'\-]+) batting\.(.*?)Runs:\s*(\d+) Hits:\s*(\d+) Walks:\s*(\d+) Errors:\s*(\d+) Pitches:\s*(\d+)(?: Runners Left On:\s*(\d+))?/i', $inningText, $halfMatches, PREG_SET_ORDER);
         foreach ($halfMatches as $index => $halfMatch) {
-            $events[] = [
+            $halves[] = [
                 'inning_number' => $inning,
                 'half' => $index === 0 ? 'top' : 'bottom',
-                'sequence_number' => $sequence++,
-                'description' => trim($halfMatch[1] . ' batting. ' . trim($halfMatch[2])),
+                'team_label' => trim($halfMatch[1]),
+                'description' => trim($halfMatch[2]),
                 'runs' => (int) $halfMatch[3],
                 'hits' => (int) $halfMatch[4],
                 'walks' => (int) $halfMatch[5],
@@ -335,7 +337,60 @@ function extract_play_events(string $plainText): array
         }
     }
 
+    return $halves;
+}
+
+function extract_play_events(array $halfInningLogs): array
+{
+    $events = [];
+    $sequence = 1;
+    foreach ($halfInningLogs as $halfLog) {
+        $events[] = [
+            'inning_number' => $halfLog['inning_number'],
+            'half' => $halfLog['half'],
+            'sequence_number' => $sequence++,
+            'description' => trim($halfLog['team_label'] . ' batting. ' . $halfLog['description']),
+            'runs' => $halfLog['runs'],
+            'hits' => $halfLog['hits'],
+            'walks' => $halfLog['walks'],
+            'errors' => $halfLog['errors'],
+            'pitches' => $halfLog['pitches'],
+            'runners_left_on' => $halfLog['runners_left_on'],
+        ];
+    }
+
     return $events;
+}
+
+function attach_extra_base_hit_totals(array $battingLines, array $halfInningLogs): array
+{
+    $counts = [];
+    foreach ($halfInningLogs as $halfLog) {
+        $side = $halfLog['half'] === 'top' ? 'away' : 'home';
+        foreach ($battingLines as $line) {
+            if ($line['side'] !== $side) {
+                continue;
+            }
+
+            $playerKey = batting_stat_key($side, $line['player_name']);
+            $counts[$playerKey] ??= ['doubles' => 0, 'triples' => 0, 'home_runs' => 0];
+
+            $quotedName = preg_quote($line['player_name'], '/');
+            $counts[$playerKey]['doubles'] += preg_match_all('/(?:^|[. ])' . $quotedName . '\s+doubled\b/i', $halfLog['description']);
+            $counts[$playerKey]['triples'] += preg_match_all('/(?:^|[. ])' . $quotedName . '\s+tripled\b/i', $halfLog['description']);
+            $counts[$playerKey]['home_runs'] += preg_match_all('/(?:^|[. ])' . $quotedName . '\s+homered\b/i', $halfLog['description']);
+        }
+    }
+
+    foreach ($battingLines as &$line) {
+        $stats = $counts[batting_stat_key($line['side'], $line['player_name'])] ?? ['doubles' => 0, 'triples' => 0, 'home_runs' => 0];
+        $line['doubles'] = $stats['doubles'];
+        $line['triples'] = $stats['triples'];
+        $line['home_runs'] = $stats['home_runs'];
+    }
+    unset($line);
+
+    return $battingLines;
 }
 
 function extract_perfect_events(string $plainText): array
@@ -367,6 +422,11 @@ function extract_game_metadata(string $text): array
 
     $decoded = html_entity_decode($text, ENT_QUOTES | ENT_HTML5);
     $decoded = str_replace(['™', '&trade;'], '', $decoded);
+    $decoded = str_replace(
+        ['Game Log Legend', 'Critical Play', 'Run Scored', 'Critical Situation', 'Simulated Play', '* Go-Ahead Play', 'Go-Ahead Play'],
+        "\n",
+        $decoded
+    );
     if (preg_match('/([A-Za-z0-9 .\'&\-]+) \(\d+ ft elevation\)/', $decoded, $match)) {
         $metadata['ballpark'] = trim($match[1]);
     }
@@ -451,4 +511,9 @@ function zero_if_x(string $value): string
 {
     $trimmed = trim($value);
     return strtoupper($trimmed) === 'X' ? '0' : $trimmed;
+}
+
+function batting_stat_key(string $side, string $playerName): string
+{
+    return $side . '|' . strtolower($playerName);
 }
