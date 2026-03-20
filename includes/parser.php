@@ -51,31 +51,7 @@ function parse_saved_game_html(string $html): array
         throw new RuntimeException('Summary table missing from uploaded HTML.');
     }
 
-    $teamRows = $xpath->query('.//tbody/tr[position()>1]', $summaryTable);
-    $teams = [];
-    foreach ($teamRows as $rowIndex => $row) {
-        $cells = [];
-        foreach ($xpath->query('./td|./th', $row) as $cell) {
-            $cells[] = normalize_space($cell->textContent);
-        }
-
-        if (count($cells) < 16) {
-            continue;
-        }
-
-        $inningValues = array_slice($cells, 4, 9);
-        $totals = array_slice($cells, 13, 3);
-        $teams[] = [
-            'side' => $rowIndex === 0 ? 'away' : 'home',
-            'team_name' => $cells[1],
-            'username' => $cells[2],
-            'result' => $cells[3],
-            'innings' => $inningValues,
-            'runs' => (int) zero_if_x($totals[0]),
-            'hits' => (int) zero_if_x($totals[1]),
-            'errors' => (int) zero_if_x($totals[2]),
-        ];
-    }
+    $teams = parse_summary_teams($xpath, $summaryTable);
 
     $boxSections = $xpath->query("//div[contains(@class,'boxscore-box')]//div[contains(@class,'section-block')]");
     $battingLines = [];
@@ -197,15 +173,14 @@ function import_parsed_game(PDO $pdo, array $parsed, int $userId, ?string $filen
 {
     $externalGameId = $parsed['game']['external_game_id'];
 
-    $checkStmt = $pdo->prepare('SELECT id FROM games WHERE external_game_id = :external_game_id LIMIT 1');
-    $checkStmt->execute(['external_game_id' => $externalGameId]);
-    if ($checkStmt->fetch()) {
-        insert_import_log($pdo, $userId, $externalGameId, 'duplicate', 'Duplicate import rejected.', $filename);
-        throw new RuntimeException('This game has already been imported.');
-    }
-
     try {
         $pdo->beginTransaction();
+
+        $existingGameId = find_existing_game_id($pdo, $externalGameId);
+        if ($existingGameId !== null) {
+            $deleteStmt = $pdo->prepare('DELETE FROM games WHERE id = :id');
+            $deleteStmt->execute(['id' => $existingGameId]);
+        }
 
         $gameStmt = $pdo->prepare(
             'INSERT INTO games (
@@ -248,7 +223,10 @@ function import_parsed_game(PDO $pdo, array $parsed, int $userId, ?string $filen
             $perfectStmt->execute($event + ['game_id' => $gameId]);
         }
 
-        insert_import_log($pdo, $userId, $externalGameId, 'success', 'Game import completed successfully.', $filename);
+        $message = $existingGameId === null
+            ? 'Game import completed successfully.'
+            : 'Existing game was replaced and re-imported successfully.';
+        insert_import_log($pdo, $userId, $externalGameId, 'success', $message, $filename);
         $pdo->commit();
 
         return $gameId;
@@ -275,6 +253,58 @@ function build_inning_lines(array $teams): array
         }
     }
     return $lines;
+}
+
+function parse_summary_teams(DOMXPath $xpath, DOMNode $summaryTable): array
+{
+    $headerRow = $xpath->query('.//tbody/tr[1]', $summaryTable)->item(0);
+    if (!$headerRow) {
+        return [];
+    }
+
+    $headerCells = [];
+    foreach ($xpath->query('./td|./th', $headerRow) as $cell) {
+        $headerCells[] = normalize_space($cell->textContent);
+    }
+
+    $runsIndex = array_search('R', $headerCells, true);
+    $hitsIndex = array_search('H', $headerCells, true);
+    $errorsIndex = array_search('E', $headerCells, true);
+    if ($runsIndex === false || $hitsIndex === false || $errorsIndex === false || $runsIndex < 4) {
+        return [];
+    }
+
+    $teamRows = $xpath->query('.//tbody/tr[position()>1]', $summaryTable);
+    $teams = [];
+    foreach ($teamRows as $rowIndex => $row) {
+        $cells = [];
+        foreach ($xpath->query('./td|./th', $row) as $cell) {
+            $cells[] = normalize_space($cell->textContent);
+        }
+
+        if (count($cells) <= $errorsIndex) {
+            continue;
+        }
+
+        $username = null;
+        $profileLink = $xpath->query('./td[3]//a|./th[3]//a', $row)->item(0);
+        if ($profileLink) {
+            $username = normalize_space($profileLink->textContent);
+        }
+
+        $teams[] = [
+            'side' => $rowIndex === 0 ? 'away' : 'home',
+            'team_name' => $cells[1] ?? ($rowIndex === 0 ? 'Away' : 'Home'),
+            'username' => $username ?: ($cells[2] ?? ($rowIndex === 0 ? 'Away' : 'Home')),
+            'result' => $cells[3] ?? '',
+            'innings' => array_slice($cells, 4, $runsIndex - 4),
+            'runs' => (int) zero_if_x($cells[$runsIndex] ?? '0'),
+            'hits' => (int) zero_if_x($cells[$hitsIndex] ?? '0'),
+            'errors' => (int) zero_if_x($cells[$errorsIndex] ?? '0'),
+        ];
+    }
+
+    return $teams;
 }
 
 function extract_play_events(string $plainText): array
@@ -369,6 +399,15 @@ function inner_html(DOMNode $node): string
         $html .= $node->ownerDocument->saveHTML($child);
     }
     return $html;
+}
+
+function find_existing_game_id(PDO $pdo, string $externalGameId): ?int
+{
+    $checkStmt = $pdo->prepare('SELECT id FROM games WHERE external_game_id = :external_game_id LIMIT 1');
+    $checkStmt->execute(['external_game_id' => $externalGameId]);
+    $existingId = $checkStmt->fetchColumn();
+
+    return $existingId === false ? null : (int) $existingId;
 }
 
 function normalize_space(string $value): string
