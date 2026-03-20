@@ -45,10 +45,10 @@ function db(): PDO
 
     $host = app_env('DB_HOST', '127.0.0.1');
     $port = app_env('DB_PORT', '5432');
-    $dbname = app_env('DB_NAME', 'postgres');
+    $dbname = app_env('DB_NAME', 'mlbts');
     $user = app_env('DB_USER', 'postgres');
     $password = app_env('DB_PASSWORD', 'postgres');
-    $sslmode = app_env('DB_SSLMODE', 'require');
+    $sslmode = app_env('DB_SSLMODE', 'disable');
 
     $dsn = sprintf('pgsql:host=%s;port=%s;dbname=%s;sslmode=%s', $host, $port, $dbname, $sslmode);
     $options = [
