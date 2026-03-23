@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/db.php';
 $pageTitle = 'Batting Leaderboard';
-$leaders = db()->query("
+$pdo = db();
+$trackedTeamsSql = sql_string_list($pdo, tracked_teams());
+$trackedTeamsLabel = implode(' and ', tracked_teams());
+$leaders = $pdo->query("
     SELECT
         player_name,
         team_name,
@@ -26,7 +29,7 @@ $leaders = db()->query("
             (CASE WHEN SUM(at_bats) = 0 THEN 0 ELSE ((SUM(hits) - SUM(doubles) - SUM(triples) - SUM(home_runs)) + (2 * SUM(doubles)) + (3 * SUM(triples)) + (4 * SUM(home_runs)))::NUMERIC / SUM(at_bats) END)
         , 3) END AS ops
     FROM batting_lines
-    WHERE team_name = 'Mustangs'
+    WHERE team_name IN ($trackedTeamsSql)
     GROUP BY player_name, team_name
     ORDER BY ops DESC, total_hits DESC, total_rbi DESC, player_name ASC
 ")->fetchAll();
@@ -34,7 +37,7 @@ require __DIR__ . '/../includes/header.php';
 ?>
 <div class="mb-4">
   <h1 class="h2 mb-1">Batting Leaderboard</h1>
-  <p class="text-body-secondary mb-0">Aggregated Mustangs batting lines across all imported games.</p>
+  <p class="text-body-secondary mb-0">Aggregated batting lines for <?= htmlspecialchars($trackedTeamsLabel) ?> across all imported games.</p>
 </div>
 <div class="card p-3">
   <div class="table-responsive">

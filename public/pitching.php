@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/db.php';
 $pageTitle = 'Pitching Leaderboard';
-$leaders = db()->query("
+$pdo = db();
+$trackedTeamsSql = sql_string_list($pdo, tracked_teams());
+$trackedTeamsLabel = implode(' and ', tracked_teams());
+$leaders = $pdo->query("
     SELECT
         player_name,
         team_name,
@@ -17,7 +20,7 @@ $leaders = db()->query("
         SUM(strikeouts) AS strikeouts,
         CASE WHEN SUM(innings_pitched_outs) = 0 THEN NULL ELSE ROUND((SUM(earned_runs) * 27.0 / SUM(innings_pitched_outs))::NUMERIC, 2) END AS era
     FROM pitching_lines
-    WHERE team_name = 'Mustangs'
+    WHERE team_name IN ($trackedTeamsSql)
     GROUP BY player_name, team_name
     ORDER BY era ASC NULLS LAST, strikeouts DESC, innings_pitched_outs DESC, player_name ASC
 ")->fetchAll();
@@ -25,7 +28,7 @@ require __DIR__ . '/../includes/header.php';
 ?>
 <div class="mb-4">
   <h1 class="h2 mb-1">Pitching Leaderboard</h1>
-  <p class="text-body-secondary mb-0">Aggregated Mustangs pitching lines across all imported games.</p>
+  <p class="text-body-secondary mb-0">Aggregated pitching lines for <?= htmlspecialchars($trackedTeamsLabel) ?> across all imported games.</p>
 </div>
 <div class="card p-3">
   <div class="table-responsive">

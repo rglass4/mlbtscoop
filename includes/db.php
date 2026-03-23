@@ -35,6 +35,16 @@ function app_env(string $key, ?string $default = null): ?string
     return $value === false ? $default : $value;
 }
 
+function tracked_teams(): array
+{
+    return ['Mustangs', 'Glory'];
+}
+
+function sql_string_list(PDO $pdo, array $values): string
+{
+    return implode(', ', array_map([$pdo, 'quote'], $values));
+}
+
 function db(): PDO
 {
     static $pdo = null;

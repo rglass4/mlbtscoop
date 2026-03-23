@@ -6,11 +6,13 @@ require_once __DIR__ . '/../includes/db.php';
 
 $pageTitle = 'Dashboard';
 $pdo = db();
+$trackedTeamsSql = sql_string_list($pdo, tracked_teams());
+$trackedTeamsLabel = implode(' and ', tracked_teams());
 $totals = $pdo->query("
     SELECT
         COUNT(*) AS games,
-        COALESCE(SUM(CASE WHEN away_team = 'Mustangs' THEN away_runs ELSE 0 END + CASE WHEN home_team = 'Mustangs' THEN home_runs ELSE 0 END), 0) AS runs,
-        COALESCE(SUM(CASE WHEN away_team = 'Mustangs' THEN away_hits ELSE 0 END + CASE WHEN home_team = 'Mustangs' THEN home_hits ELSE 0 END), 0) AS hits
+        COALESCE(SUM(CASE WHEN away_team IN ($trackedTeamsSql) THEN away_runs ELSE 0 END + CASE WHEN home_team IN ($trackedTeamsSql) THEN home_runs ELSE 0 END), 0) AS runs,
+        COALESCE(SUM(CASE WHEN away_team IN ($trackedTeamsSql) THEN away_hits ELSE 0 END + CASE WHEN home_team IN ($trackedTeamsSql) THEN home_hits ELSE 0 END), 0) AS hits
     FROM games
 ")->fetch();
 $recentGames = $pdo->query('SELECT id, away_team, home_team, away_runs, home_runs, winner_side, played_at_text FROM games ORDER BY imported_at DESC, id DESC LIMIT 10')->fetchAll();
@@ -30,7 +32,7 @@ $topBatters = $pdo->query("
             (CASE WHEN SUM(at_bats) = 0 THEN 0 ELSE ((SUM(hits) - SUM(doubles) - SUM(triples) - SUM(home_runs)) + (2 * SUM(doubles)) + (3 * SUM(triples)) + (4 * SUM(home_runs)))::NUMERIC / SUM(at_bats) END)
         , 3) END AS ops
     FROM batting_lines
-    WHERE team_name = 'Mustangs'
+    WHERE team_name IN ($trackedTeamsSql)
     GROUP BY player_name
     ORDER BY ops DESC, total_hits DESC, total_home_runs DESC, player_name ASC
     LIMIT 5
@@ -42,7 +44,7 @@ $topPitchers = $pdo->query("
         SUM(strikeouts) AS strikeouts,
         CASE WHEN SUM(innings_pitched_outs) = 0 THEN NULL ELSE ROUND((SUM(earned_runs) * 27.0 / SUM(innings_pitched_outs))::NUMERIC, 2) END AS era
     FROM pitching_lines
-    WHERE team_name = 'Mustangs'
+    WHERE team_name IN ($trackedTeamsSql)
     GROUP BY player_name
     ORDER BY era ASC NULLS LAST, strikeouts DESC, innings_pitched_outs DESC, player_name ASC
     LIMIT 5
@@ -67,7 +69,7 @@ require __DIR__ . '/../includes/header.php';
 <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
   <div>
     <h1 class="h2 mb-1">Co-op Box Score Dashboard</h1>
-    <p class="text-body-secondary mb-0">Track imported MLB The Show game logs, leaderboards, and perfect-perfect events.</p>
+    <p class="text-body-secondary mb-0">Track imported MLB The Show game logs, leaderboards, and perfect-perfect events for <?= htmlspecialchars($trackedTeamsLabel) ?>.</p>
   </div>
 </div>
 <div class="row g-3 mb-4">
