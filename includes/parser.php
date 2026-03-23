@@ -57,7 +57,7 @@ function parse_saved_game_html(string $html): array
     $battingLines = [];
     $pitchingLines = [];
     foreach ($boxSections as $sectionIndex => $boxSection) {
-        $teamName = trim(normalize_space($xpath->evaluate('string(.//h3)', $boxSection)));
+        $teamName = normalize_import_team_name(trim(normalize_space($xpath->evaluate('string(.//h3)', $boxSection))));
         $tables = $xpath->query('.//table', $boxSection);
         if ($tables->length < 2) {
             continue;
@@ -297,7 +297,7 @@ function parse_summary_teams(DOMXPath $xpath, DOMNode $summaryTable): array
 
         $teams[] = [
             'side' => $rowIndex === 0 ? 'away' : 'home',
-            'team_name' => $cells[1] ?? ($rowIndex === 0 ? 'Away' : 'Home'),
+            'team_name' => normalize_import_team_name($cells[1] ?? ($rowIndex === 0 ? 'Away' : 'Home')),
             'username' => $username ?: ($cells[2] ?? ($rowIndex === 0 ? 'Away' : 'Home')),
             'result' => $cells[3] ?? '',
             'innings' => array_slice($cells, 4, $runsIndex - 4),
@@ -325,7 +325,7 @@ function extract_half_inning_logs(string $plainText): array
             $halves[] = [
                 'inning_number' => $inning,
                 'half' => $index === 0 ? 'top' : 'bottom',
-                'team_label' => trim($halfMatch[1]),
+                'team_label' => normalize_import_team_name(trim($halfMatch[1])),
                 'description' => trim($halfMatch[2]),
                 'runs' => (int) $halfMatch[3],
                 'hits' => (int) $halfMatch[4],
@@ -516,4 +516,53 @@ function zero_if_x(string $value): string
 function batting_stat_key(string $side, string $playerName): string
 {
     return $side . '|' . strtolower($playerName);
+}
+
+function normalize_import_team_name(string $teamName): string
+{
+    $normalizedName = trim($teamName);
+    if ($normalizedName === '') {
+        return $normalizedName;
+    }
+
+    $renames = import_team_rename_map();
+    return $renames[strtolower($normalizedName)] ?? $normalizedName;
+}
+
+function import_team_rename_map(): array
+{
+    static $map = null;
+
+    if (is_array($map)) {
+        return $map;
+    }
+
+    $map = [];
+    $raw = trim((string) app_env('TEAM_RENAMES', ''));
+    if ($raw === '') {
+        return $map;
+    }
+
+    $entries = preg_split('/[\r\n,]+/', $raw) ?: [];
+    foreach ($entries as $entry) {
+        $entry = trim($entry);
+        if ($entry === '') {
+            continue;
+        }
+
+        $parts = preg_split('/\s*(?:=>|=|:)\s*/', $entry, 2);
+        if (!is_array($parts) || count($parts) !== 2) {
+            continue;
+        }
+
+        $from = trim($parts[0]);
+        $to = trim($parts[1]);
+        if ($from === '' || $to === '') {
+            continue;
+        }
+
+        $map[strtolower($from)] = $to;
+    }
+
+    return $map;
 }

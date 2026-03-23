@@ -43,6 +43,7 @@ A lightweight PHP 8+ website for importing saved MLB The Show HTML game pages, p
    - pitching lines
    - play-by-play inning summaries
    - perfect-perfect events
+   - configured import-time team renames
 4. Review the preview.
 5. Confirm the import to write everything in a single transaction.
 6. Success, failure, and duplicate attempts are written to `import_logs`.
@@ -88,6 +89,7 @@ Environment variables used by the app:
 - `DB_SSLMODE` (use `require` for Supabase, `prefer` for many local Postgres installs)
 - `APP_NAME`
 - `SESSION_NAME`
+- `TEAM_RENAMES` (optional comma-separated rename map such as `Glory:Mustangs,Team X:Mustangs`)
 
 ## Local development
 
