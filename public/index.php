@@ -11,6 +11,20 @@ $trackedTeamsLabel = implode(' and ', tracked_teams());
 $totals = $pdo->query("
     SELECT
         COUNT(*) AS games,
+        COALESCE(SUM(
+            CASE
+                WHEN away_team IN ($trackedTeamsSql) AND winner_side = 'away' THEN 1
+                WHEN home_team IN ($trackedTeamsSql) AND winner_side = 'home' THEN 1
+                ELSE 0
+            END
+        ), 0) AS wins,
+        COALESCE(SUM(
+            CASE
+                WHEN away_team IN ($trackedTeamsSql) AND winner_side = 'home' THEN 1
+                WHEN home_team IN ($trackedTeamsSql) AND winner_side = 'away' THEN 1
+                ELSE 0
+            END
+        ), 0) AS losses,
         COALESCE(SUM(CASE WHEN away_team IN ($trackedTeamsSql) THEN away_runs ELSE 0 END + CASE WHEN home_team IN ($trackedTeamsSql) THEN home_runs ELSE 0 END), 0) AS runs,
         COALESCE(SUM(CASE WHEN away_team IN ($trackedTeamsSql) THEN away_hits ELSE 0 END + CASE WHEN home_team IN ($trackedTeamsSql) THEN home_hits ELSE 0 END), 0) AS hits
     FROM games
@@ -73,9 +87,10 @@ require __DIR__ . '/../includes/header.php';
   </div>
 </div>
 <div class="row g-3 mb-4">
-  <div class="col-md-4"><div class="card metric-card p-3 h-100"><div class="text-body-secondary">Imported Games</div><div class="display-6 fw-bold"><?= (int) ($totals['games'] ?? 0) ?></div></div></div>
-  <div class="col-md-4"><div class="card metric-card p-3 h-100"><div class="text-body-secondary">Total Runs Logged</div><div class="display-6 fw-bold"><?= (int) ($totals['runs'] ?? 0) ?></div></div></div>
-  <div class="col-md-4"><div class="card metric-card p-3 h-100"><div class="text-body-secondary">Total Hits Logged</div><div class="display-6 fw-bold"><?= (int) ($totals['hits'] ?? 0) ?></div></div></div>
+  <div class="col-md-3"><div class="card metric-card p-3 h-100"><div class="text-body-secondary">Imported Games</div><div class="display-6 fw-bold"><?= (int) ($totals['games'] ?? 0) ?></div></div></div>
+  <div class="col-md-3"><div class="card metric-card p-3 h-100"><div class="text-body-secondary">Overall Record</div><div class="display-6 fw-bold"><?= (int) ($totals['wins'] ?? 0) ?>-<?= (int) ($totals['losses'] ?? 0) ?></div></div></div>
+  <div class="col-md-3"><div class="card metric-card p-3 h-100"><div class="text-body-secondary">Total Runs Logged</div><div class="display-6 fw-bold"><?= (int) ($totals['runs'] ?? 0) ?></div></div></div>
+  <div class="col-md-3"><div class="card metric-card p-3 h-100"><div class="text-body-secondary">Total Hits Logged</div><div class="display-6 fw-bold"><?= (int) ($totals['hits'] ?? 0) ?></div></div></div>
 </div>
 <div class="row g-4">
   <div class="col-lg-7">

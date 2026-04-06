@@ -33,6 +33,28 @@ $leaders = $pdo->query("
     GROUP BY player_name, team_name
     ORDER BY ops DESC, total_hits DESC, total_rbi DESC, player_name ASC
 ")->fetchAll();
+$totals = $pdo->query("
+    SELECT
+        COUNT(DISTINCT game_id) AS games_played,
+        SUM(at_bats) AS total_at_bats,
+        SUM(runs) AS total_runs,
+        SUM(hits) AS total_hits,
+        SUM(rbi) AS total_rbi,
+        SUM(walks) AS total_walks,
+        SUM(strikeouts) AS total_strikeouts,
+        SUM(doubles) AS total_doubles,
+        SUM(triples) AS total_triples,
+        SUM(home_runs) AS total_home_runs,
+        CASE WHEN SUM(at_bats) = 0 THEN 0 ELSE ROUND(SUM(hits)::NUMERIC / SUM(at_bats), 3) END AS batting_average,
+        CASE WHEN SUM(at_bats) + SUM(walks) = 0 THEN 0 ELSE ROUND((SUM(hits) + SUM(walks))::NUMERIC / (SUM(at_bats) + SUM(walks)), 3) END AS on_base_percentage,
+        CASE WHEN SUM(at_bats) = 0 THEN 0 ELSE ROUND(((SUM(hits) - SUM(doubles) - SUM(triples) - SUM(home_runs)) + (2 * SUM(doubles)) + (3 * SUM(triples)) + (4 * SUM(home_runs)))::NUMERIC / SUM(at_bats), 3) END AS slugging_percentage,
+        CASE WHEN SUM(at_bats) = 0 AND SUM(walks) = 0 THEN 0 ELSE ROUND(
+            (CASE WHEN SUM(at_bats) + SUM(walks) = 0 THEN 0 ELSE (SUM(hits) + SUM(walks))::NUMERIC / (SUM(at_bats) + SUM(walks)) END) +
+            (CASE WHEN SUM(at_bats) = 0 THEN 0 ELSE ((SUM(hits) - SUM(doubles) - SUM(triples) - SUM(home_runs)) + (2 * SUM(doubles)) + (3 * SUM(triples)) + (4 * SUM(home_runs)))::NUMERIC / SUM(at_bats) END)
+        , 3) END AS ops
+    FROM batting_lines
+    WHERE team_name IN ($trackedTeamsSql)
+")->fetch();
 require __DIR__ . '/../includes/header.php';
 ?>
 <div class="mb-4">
@@ -47,6 +69,24 @@ require __DIR__ . '/../includes/header.php';
         <?php foreach ($leaders as $row): ?>
           <tr><td><?= htmlspecialchars($row['player_name']) ?></td><td><?= htmlspecialchars($row['team_name']) ?></td><td><?= (int) $row['games_played'] ?></td><td><?= (int) $row['total_at_bats'] ?></td><td><?= (int) $row['total_hits'] ?></td><td><?= (int) $row['total_doubles'] ?></td><td><?= (int) $row['total_triples'] ?></td><td><?= (int) $row['total_home_runs'] ?></td><td><?= (int) $row['total_runs'] ?></td><td><?= (int) $row['total_rbi'] ?></td><td><?= (int) $row['total_walks'] ?></td><td><?= (int) $row['total_strikeouts'] ?></td><td><?= htmlspecialchars(number_format((float) $row['batting_average'], 3)) ?></td><td><?= htmlspecialchars(number_format((float) $row['on_base_percentage'], 3)) ?></td><td><?= htmlspecialchars(number_format((float) $row['slugging_percentage'], 3)) ?></td><td><?= htmlspecialchars(number_format((float) $row['ops'], 3)) ?></td></tr>
         <?php endforeach; ?>
+        <tr class="fw-semibold">
+          <td>Totals</td>
+          <td><?= htmlspecialchars($trackedTeamsLabel) ?></td>
+          <td><?= (int) ($totals['games_played'] ?? 0) ?></td>
+          <td><?= (int) ($totals['total_at_bats'] ?? 0) ?></td>
+          <td><?= (int) ($totals['total_hits'] ?? 0) ?></td>
+          <td><?= (int) ($totals['total_doubles'] ?? 0) ?></td>
+          <td><?= (int) ($totals['total_triples'] ?? 0) ?></td>
+          <td><?= (int) ($totals['total_home_runs'] ?? 0) ?></td>
+          <td><?= (int) ($totals['total_runs'] ?? 0) ?></td>
+          <td><?= (int) ($totals['total_rbi'] ?? 0) ?></td>
+          <td><?= (int) ($totals['total_walks'] ?? 0) ?></td>
+          <td><?= (int) ($totals['total_strikeouts'] ?? 0) ?></td>
+          <td><?= htmlspecialchars(number_format((float) ($totals['batting_average'] ?? 0), 3)) ?></td>
+          <td><?= htmlspecialchars(number_format((float) ($totals['on_base_percentage'] ?? 0), 3)) ?></td>
+          <td><?= htmlspecialchars(number_format((float) ($totals['slugging_percentage'] ?? 0), 3)) ?></td>
+          <td><?= htmlspecialchars(number_format((float) ($totals['ops'] ?? 0), 3)) ?></td>
+        </tr>
       </tbody>
     </table>
   </div>
