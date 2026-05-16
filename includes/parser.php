@@ -123,6 +123,7 @@ function parse_saved_game_html(string $html): array
     $playText = strip_tags($playLogHtml, '<br>');
     $halfInningLogs = extract_half_inning_logs($playText);
     $playEvents = extract_play_events($halfInningLogs);
+    $battingLines = attach_full_player_names_from_game_log($battingLines, $halfInningLogs);
     $battingLines = attach_extra_base_hit_totals($battingLines, $halfInningLogs);
     $perfectEvents = extract_perfect_events(strip_tags($perfectHtml, '<br>'));
     $metadata = extract_game_metadata($gameLogSection->textContent);
@@ -360,6 +361,74 @@ function extract_play_events(array $halfInningLogs): array
     }
 
     return $events;
+}
+
+function attach_full_player_names_from_game_log(array $battingLines, array $halfInningLogs): array
+{
+    $candidatesBySide = ['away' => [], 'home' => []];
+
+    foreach ($halfInningLogs as $halfLog) {
+        $side = $halfLog['half'] === 'top' ? 'away' : 'home';
+        $description = html_entity_decode($halfLog['description'], ENT_QUOTES | ENT_HTML5);
+        preg_match_all("/(?:^|[. ]+)([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)+)\s+(?:singled|doubled|tripled|homered|walked|struck out|grounded|flied|lined|popped|reached|sacrificed|hit|advanced|stole|bunted)\b/", $description, $matches);
+        foreach ($matches[1] ?? [] as $fullName) {
+            $normalized = normalize_space($fullName);
+            if ($normalized === '') {
+                continue;
+            }
+            $key = strtolower($normalized);
+            $candidatesBySide[$side][$key] = [
+                'name' => $normalized,
+                'count' => ($candidatesBySide[$side][$key]['count'] ?? 0) + 1,
+            ];
+        }
+    }
+
+    foreach ($battingLines as &$line) {
+        $sideCandidates = array_values($candidatesBySide[$line['side']] ?? []);
+        if ($sideCandidates === []) {
+            continue;
+        }
+
+        $lineParts = preg_split('/\s+/', trim($line['player_name'])) ?: [];
+        $lineLast = strtolower(end($lineParts) ?: '');
+        $lineFirst = strtolower($lineParts[0] ?? '');
+        if ($lineLast === '') {
+            continue;
+        }
+
+        $matches = [];
+        foreach ($sideCandidates as $candidate) {
+            $candidateParts = preg_split('/\s+/', trim($candidate['name'])) ?: [];
+            $candidateLast = strtolower(end($candidateParts) ?: '');
+            $candidateFirst = strtolower($candidateParts[0] ?? '');
+            if ($candidateLast !== $lineLast) {
+                continue;
+            }
+
+            if ($lineFirst !== '' && str_contains($lineFirst, '.')) {
+                $initial = strtolower(substr(str_replace('.', '', $lineFirst), 0, 1));
+                if ($initial !== '' && substr($candidateFirst, 0, 1) !== $initial) {
+                    continue;
+                }
+            }
+
+            $matches[] = $candidate;
+        }
+
+        if (count($matches) !== 1) {
+            continue;
+        }
+
+        if (count(preg_split('/\s+/', trim($line['player_name'])) ?: []) >= 2) {
+            continue;
+        }
+
+        $line['player_name'] = $matches[0]['name'];
+    }
+    unset($line);
+
+    return $battingLines;
 }
 
 function attach_extra_base_hit_totals(array $battingLines, array $halfInningLogs): array
